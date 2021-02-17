@@ -1,4 +1,4 @@
-import numpy
+import numpy as np
 import operator
 import os
 import random
@@ -8,7 +8,7 @@ import pandas as pd
 from collections import Counter, defaultdict
 from sklearn.feature_extraction.text import CountVectorizer, TfidfTransformer
 
-def delete_smallest_texts(collections, minimal_n_frames):
+def delete_smallest_texts(collections, minimal_n_frames,verbose):
     """
     load the event_type_info_dict and delete the smallest texts.
     :param collections: collection of collections of dictionaries per event type
@@ -17,15 +17,20 @@ def delete_smallest_texts(collections, minimal_n_frames):
     :type minimal_n_frames: integer
     """
     sliced_corpus = {}
-
+    count = 0
     for event_type, events in collections.items():
         new_list = []
         for event in events:
             for title, stats in event.items():
                 if stats['frame frequency'] >= minimal_n_frames:
                     new_list.append(event)
+                else:
+                    count += 1
+                    continue
         assert len(new_list) != 0, "no documents containing more frames than provided threshold"
         sliced_corpus[event_type] = new_list
+    if verbose >= 1:
+        print(f"{count} texts with less than {minimal_n_frames} frames removed")
     return sliced_corpus
 
 def sample_corpus(collections):
@@ -175,6 +180,14 @@ def event_type_means(event_type_docs_tf_idfdict):
         event_type_tfidf_dict[event_type] = ranked_scores
     return event_type_tfidf_dict
 
+def split_on_space(text):
+    """
+    split text on spaces.
+    :param text: the text that needs to be tokenized
+    :type text: string
+    """
+    return text.split(' ')
+
 def tf_idf_doc_level(collections, stopframes, min_df):
     """
     calculate tf-idf scores on document level and get means per event type
@@ -199,7 +212,7 @@ def tf_idf_doc_level(collections, stopframes, min_df):
                 lists_frames.append(space)
                 incidents.append(event)
 
-    vectorizer = CountVectorizer(lowercase=False, stop_words=stopframes, min_df=min_df) #frame vocabulary
+    vectorizer = CountVectorizer(lowercase=False, stop_words=stopframes, analyzer=split_on_space, min_df=min_df) #frame vocabulary
     lists_vector_data = vectorizer.fit_transform(lists_frames) #data structure that represents the instances through their vectors
     column_headers = vectorizer.get_feature_names() #frame vocabulary mapped to data columns
     tfidf_transformer = TfidfTransformer()
@@ -230,14 +243,6 @@ def tf_idf_doc_level(collections, stopframes, min_df):
     event_type_tfidf_dict = event_type_means(event_type_docs_tf_idfdict)
     return event_type_tfidf_dict
 
-def split_on_space(text):
-    """
-    split text on spaces.
-    :param text: the text that needs to be tokenized
-    :type text: string
-    """
-    return text.split(' ')
-
 def c_tf_idf(frame_freq_event_type, total_freq_frames_event_type, total_n_docs, frame_freq_event_types):
     """
     calculates c_tf_idf for a frame in a given matrix.
@@ -251,7 +256,9 @@ def c_tf_idf(frame_freq_event_type, total_freq_frames_event_type, total_n_docs, 
     :type frame_freq_event_types: integer
     """
     tf = frame_freq_event_type/total_freq_frames_event_type
-    idf = math.log(total_n_docs/frame_freq_event_types)
+    #idf = math.log(total_n_docs/frame_freq_event_types)
+    idf_array = np.log(np.divide(total_n_docs, frame_freq_event_types)).reshape(-1,1)
+    idf = idf_array[0][0]
     c_tf_idf = tf*idf
     return c_tf_idf
 
@@ -287,7 +294,6 @@ def ff_icf(collections, event_type_frames_dict, frame_freq_dict):
     assert vector_shape[0] == len(collections), "not all event types are represented in matrix"
     assert vector_shape[1] == len(column_headers), "not all frames are represented in matrix"
     frames_vector_array = frames_vector_data.toarray()
-
     list_of_lists = []
 
     for row in frames_vector_array: #iterate over the vectors
@@ -299,7 +305,7 @@ def ff_icf(collections, event_type_frames_dict, frame_freq_dict):
             for event_type, freq_dict in frame_freq_dict.items(): #iterate over event_type:dictionary with frequencies
                 if frame in freq_dict: #if the frame is in the dictionary of the event type
                     frame_freq_event_types += freq_dict[frame]['absolute frequency'] #add the absolute frequency to counter
-            assert frame_freq_event_types != 0, f"{frame} not corpus"
+            assert frame_freq_event_types != 0, f"{frame} not in corpus"
             c_tf_idf_score = c_tf_idf(frame_freq_event_type, total_freq_frames_event_type, total_n_docs, frame_freq_event_types)
             scores.append(c_tf_idf_score) #append the score to a list
         list_of_lists.append(scores) #append the list to another list. The result is a list of scores per each event type
@@ -330,17 +336,22 @@ def contrastive_analysis(collections, analysis_types, stopframes, min_df, verbos
 
     for analysis_type in analysis_types:
         if analysis_type == "tf_idf":
-            event_type_tfidf_dict = tf_idf_doc_level(collections, event_type_frames_dict, frame_freq_dict, stopframes, min_df)
+            event_type_tfidf_dict = tf_idf_doc_level(collections, stopframes, min_df)
+
             if verbose >= 3:
                 for event_type, scores in event_type_tfidf_dict.items():
                     print(f'{event_type}: top mean ranking: {scores[:3]}')
             output_list.append(event_type_tfidf_dict)
+
         if analysis_type == "c_tf_idf":
             c_tf_idf_dict = ff_icf(collections, event_type_frames_dict, frame_freq_dict)
+
             if verbose >= 3:
                 for event_type, scores in c_tf_idf_dict.items():
-                    print(f'{event_type}: top mean ranking: {scores[:3]}')
+                    print(f'{event_type}: top ranking: {scores[:3]}')
+                    print(f'{event_type}: bottom ranking: {scores[-3:]}')
             output_list.append(c_tf_idf_dict)
+
     return output_list, frame_freq_dict
 
 def create_output_folder(output_folder,start_from_scratch):
@@ -354,24 +365,33 @@ def create_output_folder(output_folder,start_from_scratch):
     if not os.path.isdir(folder):
         os.mkdir(folder)
 
-def output_tfidf_to_format(tf_idfdict,frame_freq_dict,xlsx_path,output_folder,start_from_scratch,cutoff_point=40):
+def output_tfidf_to_format(tf_idfdict,frame_freq_dict,xlsx_path,output_folder,start_from_scratch,cutoff_point=None):
     """exports the output of the tf-idf analysis to an excel format"""
     headers = ['event type', 'rank', 'frame', 'tf-idf value', 'absolute freq', 'relative freq', 'judgement']
     list_of_lists = []
 
+    if cutoff_point == None:
+        for key in tf_idfdict:
+            cutoff_point = len(tf_idfdict[key])
+            break
+
     for key in tf_idfdict:
         for tupl, number in zip(tf_idfdict[key][:cutoff_point], range(1,(cutoff_point+1))):
-                one_row = [key, number]
-                frame = tupl[0]
-                score = tupl[1]
-                one_row.append(frame)
-                one_row.append(score)
+            one_row = [key, number]
+            frame = tupl[0]
+            score = tupl[1]
+            one_row.append(frame)
+            one_row.append(score)
+            if frame in frame_freq_dict[key]:
                 abs_freq = frame_freq_dict[key][frame]['absolute frequency']
                 rel_freq = frame_freq_dict[key][frame]['relative frequency']
-                one_row.append(abs_freq)
-                one_row.append(rel_freq)
-                one_row.append('')
-                list_of_lists.append(one_row)
+            else:
+                abs_freq = 0
+                rel_freq = 0
+            one_row.append(abs_freq)
+            one_row.append(rel_freq)
+            one_row.append('')
+            list_of_lists.append(one_row)
 
     df = pd.DataFrame(list_of_lists, columns=headers)
 

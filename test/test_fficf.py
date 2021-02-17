@@ -35,7 +35,7 @@ for tupl in c_tf_idf_dict["Q1"]:
     frame = tupl[0]
     score = tupl[1]
     if frame == 'Organization':
-        assert score == 0.0, f"{frame} gets {score} instead of 0.0"
+        assert score == 0.0, f"{frame} gets {score} instead of 0.0" #0.0
     if frame == 'Origin':
         assert score == 0.115525, f"{frame} gets {score} instead of 0.115525"
     if frame == 'People':

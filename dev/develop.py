@@ -2,18 +2,22 @@ import sys
 import os
 sys.path.append('../../')
 
-from HDD_analysis import get_paths, event_type_info, frame_predicate_distribution, fficf_info
+from HDD_analysis import historical_distance, linguistic_analysis
 
 output_folder = '../test/output'
-xlsx_paths = ['../test/output/tf_idf_means_per_event_type.xlsx', '../test/output/c_tf_idf.xlsx']
-analysis_types = ["tf_idf", "c_tf_idf"]
-generic_frames = ['Statement', 'Calendric_unit', 'Locative_relation', 'Cardinal_numbers','People']
+pdf_path = '../test/output/frequency.pdf'
+analysis_types = []
+frames = ['Attack','Weapon','Law_enforcement_agency', 'Leadership', 'Calendric_unit', 'Statement']
+time_buckets = {"day_0":range(0,1), "day_1":range(1,2), "day_2_to_30":range(2,31), "day_31_beyond":range(31,100000000)}
 
-event_type_frames_dict = fficf_info(project='HistoricalDistanceData',
-                                    language='en',
-                                    analysis_types=analysis_types,
-                                    xlsx_paths=xlsx_paths,
-                                    output_folder=None,
-                                    start_from_scratch=False,
-                                    stopframes=generic_frames,
-                                    verbose=3)
+historical_distance_info_dict, historical_distance_frames_dict = historical_distance(project='HistoricalDistanceData',
+                                                                                    language='en',
+                                                                                    dct_time_buckets=time_buckets,
+                                                                                    verbose=3)
+
+linguistic_analysis(historical_distance_frames_dict=historical_distance_frames_dict,
+                    historical_distance_info_dict=historical_distance_info_dict,
+                    event_type="Q750215",
+                    frames=frames,
+                    pdf_path=pdf_path,
+                    verbose=1)
