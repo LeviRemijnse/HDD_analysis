@@ -85,6 +85,68 @@ def frame_root(fn, features, nodes=True):
             n_nodes = root_info['len_path']
             feature['number of nodes'] = n_nodes
 
+def nominalization(historical_distance_info_dict, event_type, features):
+    """for each frame get the distribution of nouns and verbs per time bucket"""
+    for feature in features:
+        name = feature['frame']
+        nominalization_dict = {}
+        for tupl in historical_distance_info_dict[event_type]:
+            noun_count = 0
+            verb_count = 0
+            time_bucket = tupl[0]
+            list_of_dicts = tupl[1]
+            for info_dict in list_of_dicts:
+                for title, info in info_dict.items():
+                    for term_id, frame_info in info['frame info'].items():
+                        if frame_info['frame'] == name:
+                            if frame_info['POS'] == 'NOUN':
+                                noun_count += 1
+                                break
+                            elif frame_info['POS'] == 'VERB':
+                                verb_count += 1
+                                break
+                            else:
+                                break
+            if noun_count+verb_count == 0:
+                ratio_dict = {'verb': verb_count, 'noun': noun_count}
+            else:
+                ratio_verbs = verb_count/(verb_count+noun_count)
+                ratio_nouns = noun_count/(verb_count+noun_count)
+                assert ratio_verbs+ratio_nouns == 1, "ratio verbs or nouns incorrect"
+                ratio_dict = {'verb': ratio_verbs, 'noun': ratio_nouns}
+            nominalization_dict[time_bucket] = ratio_dict
+        feature['POS'] = nominalization_dict
+    return
+
+def definiteness(historical_distance_info_dict, event_type, features):
+    """get definiteness ratio of nouns per frame per time bucket"""
+    for feature in features:
+        name = feature['frame']
+        definiteness_dict = {}
+        for tupl in historical_distance_info_dict[event_type]:
+            definite_articles = 0
+            indefinite_articles = 0
+            time_bucket = tupl[0]
+            list_of_dicts = tupl[1]
+            for info_dict in list_of_dicts:
+                for title, info in info_dict.items():
+                    for term_id, frame_info in info['frame info'].items():
+                        if frame_info['frame'] == name:
+                            if frame_info['POS'] == 'NOUN' and frame_info['article']['definite'] == True:
+                                definite_articles += 1
+                                break
+                            elif frame_info['POS'] == 'NOUN' and frame_info['article']['definite'] == False:
+                                indefinite_articles += 1
+                                break
+                            else:
+                                break
+            if definite_articles+indefinite_articles == 0:
+                definiteness_dict[time_bucket] = 0.0
+            else:
+                ratio_definiteness = definite_articles/(definite_articles+indefinite_articles)
+                definiteness_dict[time_bucket] = ratio_definiteness
+        feature['definiteness ratio'] = definiteness_dict
+
 def get_features(historical_distance_info_dict, event_type, selected_features, verbose):
     """extract features from corpus"""
     frames_dict = historical_distance_frames(historical_distance_info_dict)
@@ -108,6 +170,9 @@ def get_features(historical_distance_info_dict, event_type, selected_features, v
             frame_frequency(frames_dict, historical_distance_info_dict, event_type, features)
         if feature == "frame root":
             frame_root(fn, features)
-
+        if feature == "nominalization":
+            nominalization(historical_distance_info_dict, event_type, features)
+        if feature == "definiteness":
+            definiteness(historical_distance_info_dict, event_type, features)
     print(features)
     return features
