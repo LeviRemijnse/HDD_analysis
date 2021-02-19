@@ -3,7 +3,7 @@ from .fficf_utils import contrastive_analysis, output_tfidf_to_format, sample_co
 from .predicate_utils import compile_predicates, frequency_distribution, output_predicates_to_format
 from .path_utils import get_naf_paths, get_lang2doc2dct_info
 from .historical_distance_utils import get_historical_distance, historical_distance_frames, cluster_time_buckets
-from .linguistic_analysis_utils import visualize_frequency
+from .linguistic_analysis_utils import visualize_frequency, get_features
 from lxml import etree
 import os
 
@@ -133,7 +133,6 @@ def historical_distance(project,
                                                         lang2doc2dct_info=lang2doc2dct_info,
                                                         language=language,
                                                         verbose=verbose)
-    historical_distance_frames_dict = historical_distance_frames(historical_distance_dict)
 
     if verbose >= 1:
         for event_type, sorted_days in historical_distance_dict.items():
@@ -145,18 +144,20 @@ def historical_distance(project,
         time_bucket_dict = cluster_time_buckets(historical_distance_dict=historical_distance_dict,
                                                     time_buckets=dct_time_buckets,
                                                     verbose=verbose)
-        time_bucket_frames_dict = historical_distance_frames(time_bucket_dict)
-        return time_bucket_dict, time_bucket_frames_dict
+        return time_bucket_dict
 
-    return historical_distance_dict, historical_distance_frames_dict
+    return historical_distance_dict
 
-def linguistic_analysis(historical_distance_frames_dict,
-                        historical_distance_info_dict,
+def linguistic_analysis(historical_distance_info_dict,
                         event_type,
-                        frames,
-                        pdf_path,
+                        selected_features,
+                        frames=None,
+                        pdf_path=None,
                         verbose=0):
     """performs statistical analyses on linguistic phenomena distributed over time buckets and visualizes them"""
-    frequency = visualize_frequency(historical_distance_frames_dict,event_type,frames,pdf_path,verbose)
-
+    #frequency = visualize_frequency(historical_distance_frames_dict,event_type,frames,pdf_path,verbose)
+    features = get_features(historical_distance_info_dict=historical_distance_info_dict,
+                            event_type=event_type,
+                            selected_features=selected_features,
+                            verbose=verbose)
     return

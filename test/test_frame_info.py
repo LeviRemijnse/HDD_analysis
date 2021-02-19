@@ -14,7 +14,6 @@ for root, directories, files in os.walk(path):
             collection.append(os.path.join(root, file))
 
 naf = collection[0]
-print(type(naf))
 
-frame_info_dict = frame_info(naf_iterable=naf,
+frame_info_dict = frame_info(naf_root=naf,
                                 verbose=2)
