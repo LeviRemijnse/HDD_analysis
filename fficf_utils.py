@@ -4,6 +4,7 @@ import os
 import random
 import statistics
 import math
+import json
 import pandas as pd
 from collections import Counter, defaultdict
 from sklearn.feature_extraction.text import CountVectorizer, TfidfTransformer
@@ -218,7 +219,7 @@ def tf_idf_doc_level(collections, stopframes, min_df):
     tfidf_transformer = TfidfTransformer()
     lists_frames_tfidf = tfidf_transformer.fit_transform(lists_vector_data)
     tf_idf_array = lists_frames_tfidf.toarray()
-    tf_idf_array_round = numpy.round(tf_idf_array, decimals=3)
+    tf_idf_array_round = np.round(tf_idf_array, decimals=3)
 
     tf_idfdict = {}
 
@@ -310,7 +311,7 @@ def ff_icf(collections, event_type_frames_dict, frame_freq_dict):
             scores.append(c_tf_idf_score) #append the score to a list
         list_of_lists.append(scores) #append the list to another list. The result is a list of scores per each event type
 
-    c_tf_idf_round = numpy.round(list_of_lists, decimals=6)
+    c_tf_idf_round = np.round(list_of_lists, decimals=6)
     assert len(c_tf_idf_round) == len(collections), "not all event types are represented as list with c-tf-idf scores"
     c_tf_idfdict = {}
 
@@ -365,15 +366,14 @@ def create_output_folder(output_folder,start_from_scratch):
     if not os.path.isdir(folder):
         os.mkdir(folder)
 
-def output_tfidf_to_format(tf_idfdict,frame_freq_dict,xlsx_path,output_folder,start_from_scratch,cutoff_point=None):
+def output_tfidf_to_format(tf_idfdict,frame_freq_dict,xlsx_path,output_folder,start_from_scratch):
     """exports the output of the tf-idf analysis to an excel format"""
     headers = ['event type', 'rank', 'frame', 'tf-idf value', 'absolute freq', 'relative freq', 'judgement']
     list_of_lists = []
 
-    if cutoff_point == None:
-        for key in tf_idfdict:
-            cutoff_point = len(tf_idfdict[key])
-            break
+    for key in tf_idfdict:
+        cutoff_point = len(tf_idfdict[key])
+        break
 
     for key in tf_idfdict:
         for tupl, number in zip(tf_idfdict[key][:cutoff_point], range(1,(cutoff_point+1))):
@@ -399,4 +399,24 @@ def output_tfidf_to_format(tf_idfdict,frame_freq_dict,xlsx_path,output_folder,st
         create_output_folder(output_folder=output_folder,
                             start_from_scratch=start_from_scratch)
         df.to_excel(xlsx_path, index=False)
+
     return df
+
+def output_tfidf_to_json(tf_idfdict,json_path,output_folder,start_from_scratch):
+    """exports the output of the tf-idf analysis to a json format"""
+    json_dict = {}
+
+    for key in tf_idfdict:
+        scores_dict = {}
+        for tupl in tf_idfdict[key]:
+            frame = tupl[0]
+            score = tupl[1]
+            scores_dict[frame] = score
+        json_dict[key] = scores_dict
+
+    if output_folder != None:
+        create_output_folder(output_folder=output_folder,
+                            start_from_scratch=start_from_scratch)
+        with open(json_path, 'w') as outfile:
+            json.dump(json_dict, outfile, indent=4, sort_keys=True)
+    return

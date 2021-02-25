@@ -1,9 +1,9 @@
 from .xml_utils import srl_id_frames, term_id_lemmas, determiner_id_info, compound_id_info, get_text_title, frame_info_dict, sentence_info
-from .fficf_utils import contrastive_analysis, output_tfidf_to_format, sample_corpus, delete_smallest_texts
+from .fficf_utils import contrastive_analysis, output_tfidf_to_format, sample_corpus, delete_smallest_texts, output_tfidf_to_json
 from .predicate_utils import compile_predicates, frequency_distribution, output_predicates_to_format
 from .path_utils import get_naf_paths, get_lang2doc2dct_info
 from .historical_distance_utils import get_historical_distance, historical_distance_frames, cluster_time_buckets
-from .linguistic_analysis_utils import visualize_frequency, get_features
+from .linguistic_analysis_utils import visualize_frequency, get_features, doc_features, split_df, sample_time_buckets
 from lxml import etree
 import os
 
@@ -60,6 +60,7 @@ def fficf_info(project,
                 stopframes=None,
                 min_df=2,
                 minimal_frames_per_doc=10,
+                json_paths=None,
                 verbose=0):
     """extract frames dictionary with naf information per text per event type, perform fficf metrics and returns a dataframe"""
     assert type(analysis_types) == list, "analysis types are not in list"
@@ -91,6 +92,13 @@ def fficf_info(project,
                                 xlsx_path=xlsx_path,
                                 output_folder=output_folder,
                                 start_from_scratch=start_from_scratch)
+
+    if json_paths != None:
+        for output_dict, json_path in zip(output_list, json_paths):
+            output_tfidf_to_json(tf_idfdict=output_dict,
+                                    json_path=json_path,
+                                    output_folder=output_folder,
+                                    start_from_scratch=start_from_scratch)
     return
 
 def frame_predicate_distribution(collections,
@@ -151,13 +159,24 @@ def historical_distance(project,
 def linguistic_analysis(historical_distance_info_dict,
                         event_type,
                         selected_features,
+                        discourse_sensitive=True,
+                        typicality_scores=None,
                         frames=None,
                         pdf_path=None,
                         verbose=0):
     """performs statistical analyses on linguistic phenomena distributed over time buckets and visualizes them"""
+    sampled_corpus = sample_time_buckets(historical_distance_info_dict=historical_distance_info_dict,
+                                            event_type=event_type,)
     #frequency = visualize_frequency(historical_distance_frames_dict,event_type,frames,pdf_path,verbose)
-    features = get_features(historical_distance_info_dict=historical_distance_info_dict,
-                            event_type=event_type,
-                            selected_features=selected_features,
-                            verbose=verbose)
+    #features = get_features(historical_distance_info_dict=historical_distance_info_dict,
+                            #event_type=event_type,
+                            #selected_features=selected_features,
+                            #verbose=verbose)
+    df = doc_features(historical_distance_info_dict=historical_distance_info_dict,
+                        event_type=event_type,
+                        selected_features=selected_features,
+                        discourse_sensitive=discourse_sensitive,
+                        typicality_scores=typicality_scores,
+                        verbose=verbose)
+    train_df, dev_df, test_df = split_df(df)
     return
