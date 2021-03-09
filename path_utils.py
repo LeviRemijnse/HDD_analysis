@@ -46,3 +46,39 @@ def get_lang2doc2dct_info(project,language, verbose):
     if verbose >= 1:
         print(f"lang2doc2dct_info contains historical distance for {len(historical_distance_dict[language])} documents")
     return historical_distance_dict
+
+def analysis_paths(time_bucket_config, absolute_path, experiment, balanced_classes, verbose):
+    """take the keys of time bucket dictionary and return paths to experiment folder"""
+    keys = list(time_bucket_config.keys())
+    folder_basename = '---'.join(sorted(keys))
+
+    if balanced_classes:
+        balanced = "balanced"
+    else:
+        balanced = "unbalanced"
+
+    folder_basename = f"{folder_basename}+{balanced}"
+    paths_dict = {}
+
+    folder = f"{absolute_path}/{folder_basename}"
+    paths_dict['time bucket folder'] = folder
+    json_path = f"{absolute_path}/{folder_basename}/sampled_corpus.json"
+    paths_dict['sampled corpus'] = json_path
+    train_path = f"{absolute_path}/{folder_basename}/titles_train.pkl"
+    paths_dict['train path'] = train_path
+    dev_path = f"{absolute_path}/{folder_basename}/titles_dev.pkl"
+    paths_dict['dev path'] = dev_path
+    test_path = f"{absolute_path}/{folder_basename}/titles_test.pkl"
+    paths_dict['test path'] = test_path
+    report = f"{absolute_path}/{folder_basename}/{experiment}/report.txt"
+    paths_dict['classification report'] = report
+    unknown_path = f"{absolute_path}/{folder_basename}/unknown_distance.json"
+    paths_dict['unknown distance'] = unknown_path
+    model_path = f"{absolute_path}/{folder_basename}/{experiment}/model.pkl"
+    paths_dict['model'] = model_path
+    experiment_folder = f"{absolute_path}/{folder_basename}/{experiment}"
+    paths_dict["experiment folder"] = experiment_folder
+
+    if verbose >= 1:
+        print(folder)
+    return paths_dict

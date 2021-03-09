@@ -1,228 +1,159 @@
 import pandas as pd
-import matplotlib.pyplot as plt
-import seaborn as sns
 import json
+import pickle
 import numpy as np
-from collections import Counter
-from nltk.corpus import framenet as fn
-from .historical_distance_utils import historical_distance_frames
-from .frame_relation_utils import get_inheritance_relations, get_digraph, get_frame_to_root_information
-from .fficf_utils import frames_from_dict, split_on_space
+from .fficf_utils import frames_from_dict, split_on_space, create_output_folder, frames_collection
+from .predicate_utils import get_predicate_vocabulary, predicates_from_dict
+from sklearn.svm import SVC
+from sklearn.svm import LinearSVC
 from sklearn.feature_extraction.text import CountVectorizer
+from sklearn.metrics import classification_report
+from sklearn.feature_extraction import DictVectorizer
 
-def sample_time_buckets(historical_distance_info_dict, event_type):
-    """
-    create proportional sizes of subcorpora across time buckets. randomize when selecting the texts for this sample.
-    :param historical_distance_info_dict: collection of collections of dictionaries per event type
-    :param event_type:
-    :type historical_distance_info_dict: dictionary
-    :type event_type:
-    """
-    lengths_dict = {}
-
-    for cluster in historical_distance_info_dict[event_type]:
-        time_bucket = cluster[0]
-        list_of_dicts = cluster[1]
-        lengths_dict[time_bucket] = len(list_of_dicts)
-
-    len_smallest_corpus = min(lengths_dict.values())
-    sampled_collections = {}
-
-    for event_type, info_dicts in collections.items():
-        sampled_list = random.sample(info_dicts, len_smallest_corpus)
-        sampled_collections[event_type] = sampled_list
-
-    return sampled_collections
-
-def visualize_frequency(historical_distance_frames_dict,event_type,frames,pdf_path,verbose):
-    """extract frequencies of specified frames per time bucket and visualize"""
-    headers = ["time bucket", "frame", "frequency"]
+def titles_buckets_df(list_of_buckets):
+    """extract titles and corresponding time buckets and put them in a list of lists"""
     list_of_lists = []
 
-    for frame in frames:
-        for tupl in historical_distance_frames_dict[event_type]:
-            one_row = []
-            time_bucket = tupl[0]
-            one_row.append(time_bucket)
-            clustered_frames = tupl[1]
-            frequencies = Counter(clustered_frames)
-            one_row.append(frame)
-            one_row.append(frequencies[frame])
-            list_of_lists.append(one_row)
+    for cluster in list_of_buckets:
+        time_bucket = cluster[0]
+        list_of_dicts = cluster[1]
+        for doc in list_of_dicts:
+            title = list(doc.keys())[0]
+            title_bucket = [title, time_bucket]
+            list_of_lists.append(title_bucket)
+    df = pd.DataFrame(list_of_lists, columns=['Title', 'Time bucket'])
+    return df
 
-    df = pd.DataFrame(list_of_lists, columns=headers)
-    lineplot = sns.lineplot(data=df, x="time bucket", y="frequency", hue="frame")
-    plt.savefig(pdf_path)
+def train_validate_test_split(df, train_percent=.8, validate_percent=.1, seed=None):
+    """split a data frame into train, validate and test set, following preset percentages"""
+    np.random.seed(seed)
+    perm = np.random.permutation(df.index) #randomize DataFrame index
+    m = len(df.index) #get length of index
+    train_end = int(train_percent * m) #calculate size of training set
+    validate_end = int(validate_percent * m) + train_end #calculate size of validation set
+    train = df.loc[perm[:train_end]] #create new DataFrame from the randomized index of training set size
+    validate = df.loc[perm[train_end:validate_end]] #create new DataFrame from the randomized index of validate set size
+    test = df.loc[perm[validate_end:]] #create new DataFrame from the remaining index
+    return train, validate, test
 
-    return
+def split_df(df):
+    """split the dataframe into training, development and test dataframes"""
+    time_buckets = df["Time bucket"].unique() #get unique labels from DataFrame
+    grouped_df = df.groupby("Time bucket") #group the DataFrame by time bucket labels
 
-def frame_frequency(frames_dict, historical_distance_info_dict, event_type, features, discourse_sensitive=True):
-    """extracts frequency per frame per time bucket and return as feature"""
-    count_list = []
+    train_dfs = []
+    develop_dfs = []
+    test_dfs = []
 
-    for tupl in frames_dict[event_type]:
-        time_bucket = tupl[0]
-        clustered_frames = tupl[1]
-        frequencies = Counter(clustered_frames)
-        new_tuple = (time_bucket, frequencies)
-        count_list.append(new_tuple)
+    for time_bucket in time_buckets: #iterate over labels
+        group = grouped_df.get_group(time_bucket) #create new DataFrame from each subset with different label
+        train, develop, test = train_validate_test_split(group) #split Dataframe into train, develop, test
+        assert len(train) > len(develop), "training set not larger than development set"
+        assert len(train) > len(test), "training set not larger than test set"
+        train_dfs.append(train) #append training DataFrame to list
+        develop_dfs.append(develop) #append dev DataFrame to list
+        test_dfs.append(test) #append test DataFrame to list
 
-    for feature in features:
-        name = feature['frame']
-        frequencies = {}
-        for tupl in count_list:
-            time_bucket = tupl[0]
-            counted_frames = tupl[1]
-            if name in counted_frames:
-                frequencies[time_bucket] = counted_frames[name]
-            else:
-                frequencies[time_bucket] = 0
-        feature['frequency'] = frequencies
+    assert len(train_dfs) == len(time_buckets), "not all time bucket labels have their own set"
 
-    if discourse_sensitive == True:
-        for feature in features:
-            name = feature['frame']
-            sensitive_frequencies = {}
-            for tupl in historical_distance_info_dict[event_type]:
-                total = 0
-                time_bucket = tupl[0]
-                list_of_dicts = tupl[1]
-                for info_dict in list_of_dicts:
-                    for title, info in info_dict.items():
-                        for term_id, frame_info in info['frame info'].items():
-                            if frame_info['frame'] == name:
-                                sent_id = int(frame_info['sentence'])
-                                weighted_frame_occ = 1/sent_id
-                                total += weighted_frame_occ
-                sensitive_frequencies[time_bucket] = total
-            feature['discourse sensitive ratio'] = sensitive_frequencies
-    return
+    train_df = pd.concat(train_dfs) #concatenate training DataFrames
+    develop_df = pd.concat(develop_dfs) #concatenate dev DataFrames
+    test_df = pd.concat(test_dfs) #concatenate test DataFrames
+    assert len(train_df) > len(develop_df), "training set not larger than development set"
+    assert len(train_df) > len(test_df), "training set not larger than test set"
+    return train_df, develop_df, test_df
 
-def frame_root(fn, features, nodes=True):
-    """for each frame get the root frame through inheritance relations"""
-    sub_to_super = get_inheritance_relations(fn=fn, verbose=1)
-    g, roots = get_digraph(sub_to_super, verbose=1)
-    frame_to_root_info = get_frame_to_root_information(di_g=g, fn=fn, roots=roots, verbose=1)
-
-    for feature in features:
-        name = feature['frame']
-        root_info = frame_to_root_info[name]
-        root = root_info['root']
-        feature['root'] = root
-        if nodes == True:
-            n_nodes = root_info['len_path']
-            feature['number of nodes'] = n_nodes
-
-def nominalization(historical_distance_info_dict, event_type, features):
-    """for each frame get the distribution of nouns and verbs per time bucket"""
-    for feature in features:
-        name = feature['frame']
-        nominalization_dict = {}
-        for tupl in historical_distance_info_dict[event_type]:
-            noun_count = 0
-            verb_count = 0
-            time_bucket = tupl[0]
-            list_of_dicts = tupl[1]
-            for info_dict in list_of_dicts:
-                for title, info in info_dict.items():
-                    for term_id, frame_info in info['frame info'].items():
-                        if frame_info['frame'] == name:
-                            if frame_info['POS'] == 'NOUN':
-                                noun_count += 1
-                                break
-                            elif frame_info['POS'] == 'VERB':
-                                verb_count += 1
-                                break
-                            else:
-                                break
-            if noun_count+verb_count == 0:
-                ratio_dict = {'verb': verb_count, 'noun': noun_count}
-            else:
-                ratio_verbs = verb_count/(verb_count+noun_count)
-                ratio_nouns = noun_count/(verb_count+noun_count)
-                assert ratio_verbs+ratio_nouns == 1, "ratio verbs or nouns incorrect"
-                ratio_dict = {'verb': ratio_verbs, 'noun': ratio_nouns}
-            nominalization_dict[time_bucket] = ratio_dict
-        feature['POS'] = nominalization_dict
-    return
-
-def definiteness(historical_distance_info_dict, event_type, features):
-    """get definiteness ratio of nouns per frame per time bucket"""
-    for feature in features:
-        name = feature['frame']
-        definiteness_dict = {}
-        for tupl in historical_distance_info_dict[event_type]:
-            definite_articles = 0
-            indefinite_articles = 0
-            time_bucket = tupl[0]
-            list_of_dicts = tupl[1]
-            for info_dict in list_of_dicts:
-                for title, info in info_dict.items():
-                    for term_id, frame_info in info['frame info'].items():
-                        if frame_info['frame'] == name:
-                            if frame_info['POS'] == 'NOUN' and frame_info['article']['definite'] == True:
-                                definite_articles += 1
-                                break
-                            elif frame_info['POS'] == 'NOUN' and frame_info['article']['definite'] == False:
-                                indefinite_articles += 1
-                                break
-                            else:
-                                break
-            if definite_articles+indefinite_articles == 0:
-                definiteness_dict[time_bucket] = 0.0
-            else:
-                ratio_definiteness = definite_articles/(definite_articles+indefinite_articles)
-                definiteness_dict[time_bucket] = ratio_definiteness
-        feature['definiteness ratio'] = definiteness_dict
-
-def get_features(historical_distance_info_dict, event_type, selected_features, verbose):
-    """extract features from corpus"""
-    frames_dict = historical_distance_frames(historical_distance_info_dict)
-
-    frames = set()
-
-    for tupl in frames_dict[event_type]:
-        time_bucket = tupl[0]
-        clustered_frames = tupl[1]
-        for frame in clustered_frames:
-            frames.add(frame)
-
-    features = []
-
-    for frame in frames:
-        frame_dict = {"frame": frame}
-        features.append(frame_dict)
-
-    for feature in selected_features:
-        if feature == "frame frequency":
-            frame_frequency(frames_dict, historical_distance_info_dict, event_type, features)
-        if feature == "frame root":
-            frame_root(fn, features)
-        if feature == "nominalization":
-            nominalization(historical_distance_info_dict, event_type, features)
-        if feature == "definiteness":
-            definiteness(historical_distance_info_dict, event_type, features)
-    print(features)
-    return features
+def df_to_pickle(train_df, dev_df, test_df, train_path, dev_path, test_path, output_folder, start_from_scratch, verbose):
+    """export DataFrames to pickle"""
+    if output_folder != None:
+        create_output_folder(output_folder=output_folder,
+                            start_from_scratch=start_from_scratch,
+                            verbose=verbose)
+    train_df.to_pickle(train_path)
+    dev_df.to_pickle(dev_path)
+    test_df.to_pickle(test_path)
 
 def discourse_ratio(doc, frames):
     """get the discourse sensitive ratio per frame for one document"""
     frames = set(frames)
     discourse_ratio_dict = {}
 
-    for title, info in doc.items():
-        for frame in frames:
+    for title, info in doc.items(): #iterate over title:info of document
+        for frame in frames: #iterate over set of frames
             total = 0
-        for term_id, frame_info in info['frame info'].items():
+        for term_id, frame_info in info['frame info'].items(): #iterate over term id:frame info
             if frame_info['frame'] == frame:
-                sent_id = int(frame_info['sentence'])
-                weighted_frame_occ = 1/sent_id
-                total += weighted_frame_occ
-            discourse_ratio_dict[frame] = total
+                sent_id = int(frame_info['sentence']) #get sentence number
+                weighted_frame_occ = 1/sent_id #get discourse ratio
+                total += weighted_frame_occ #add discourse ratio for each token of the same frame in doc
+            discourse_ratio_dict[frame] = total #add frame:total discourse ratio to dict
     return discourse_ratio_dict
 
-def doc_features(historical_distance_info_dict, event_type, selected_features, discourse_sensitive, typicality_scores, verbose):
+def get_frame_vocabulary(historical_distance_dict,event_type):
+    """extract frames for an event type and put them in a list"""
+    list_of_lists = []
+
+    for cluster in historical_distance_dict[event_type]:
+        day = cluster[0]
+        collection = cluster[1]
+        frames = frames_collection(collection)
+        list_of_lists.append(frames)
+
+    flat_list = [item for sublist in list_of_lists for item in sublist]
+    vocabulary = list(set(flat_list))
+    return vocabulary
+
+def bag_of_predicates(historical_distance_info_dict, event_type, titles_df, verbose):
+    """create BOW features for all lexical units across documents"""
+    vocabulary = get_predicate_vocabulary(historical_distance_dict=historical_distance_info_dict,
+                                            event_type=event_type,
+                                            verbose=verbose)
+    target_titles = set(titles_df["Title"])
+    input_vec = []
+    time_bucket_list = []
+    titles = []
+
+    for tupl in historical_distance_info_dict[event_type]:
+        time_bucket = tupl[0]
+        list_of_dicts = tupl[1]
+        for doc in list_of_dicts:
+            title = list(doc.keys())[0]
+            if title not in target_titles:
+                continue
+            predicates = frames_from_dict(doc) #extract list of frames from doc
+            space = ' '
+            space = space.join(predicates) #join the frames
+            input_vec.append(space) #append string of frames to list
+            time_bucket_list.append(time_bucket) #append time bucket to time buckets list
+            titles.append(title) #append title of doc to list
+
+    vectorizer = CountVectorizer(analyzer=split_on_space, min_df=2, vocabulary=vocabulary) #initiate vectorizer
+    predicates_vector_data = vectorizer.fit_transform(input_vec) #fit transform input
+    headers = vectorizer.get_feature_names() #get frames as column headers
+    predicates_vector_array = predicates_vector_data.toarray() #output vectorizer to array
+
+    list_of_lists = []
+
+    for doc, bucket, title in zip(predicates_vector_array, time_bucket_list, titles): #iterate over both vectors, time buckets and titles
+        one_row = []
+        for count, predicate in zip(doc, headers): #iterate over both values and corresponding frames
+            one_row.append(count) #append value to row
+        one_row.append(bucket) #append time bucket as final value to row
+        list_of_lists.append(one_row) #append row to list
+
+    headers.append("time bucket") #append time bucket header to headers list
+
+    assert len(input_vec) == len(list_of_lists), "not all documents are represented"
+    for row in list_of_lists:
+        assert len(row) == len(headers), "not all frames are represented in row"
+        assert type(row[-1]) == str, "time bucket not in row"
+
+    df = pd.DataFrame(list_of_lists, columns=headers) #create DataFrame
+    return df
+
+def doc_features(historical_distance_info_dict, vocabulary, titles_df, event_type, selected_features, discourse_sensitive, typicality_scores, verbose):
     """get features on document level"""
+    target_titles = set(titles_df["Title"])
     input_vec = []
     time_bucket_list = []
     titles = []
@@ -230,89 +161,97 @@ def doc_features(historical_distance_info_dict, event_type, selected_features, d
 
     if typicality_scores != None:
         with open(typicality_scores, "r") as infile:
-            typicality_scores_dict = json.load(infile)
+            typicality_scores_dict = json.load(infile) #load typicality scores
 
-    for tupl in historical_distance_info_dict[event_type]:
+    for tupl in historical_distance_info_dict[event_type]: #iterate over clusters in event type
         time_bucket = tupl[0]
         list_of_dicts = tupl[1]
-        for doc in list_of_dicts:
-            frames = frames_from_dict(doc)
+        for doc in list_of_dicts: #iterate over docs in cluster
+            title = list(doc.keys())[0]
+            if title not in target_titles:
+                continue
+            frames = frames_from_dict(doc) #extract list of frames from doc
             space = ' '
             space = space.join(frames) #join the frames
-            input_vec.append(space)
-            time_bucket_list.append(time_bucket)
-            for title in doc:
-                titles.append(title)
+            input_vec.append(space) #append string of frames to list
+            time_bucket_list.append(time_bucket) #append time bucket to time buckets list
+            titles.append(title) #append title of doc to list
             if discourse_sensitive == True:
-                discourse_ratio_dict = discourse_ratio(doc, frames)
-                frames_discourse_ratios_dict[title] = discourse_ratio_dict
+                discourse_ratio_dict = discourse_ratio(doc, frames) #get dict of discourse sensitive ratios per frame for doc
+                frames_discourse_ratios_dict[title] = discourse_ratio_dict #add doc title:discourse ratios to dict
 
-    vectorizer = CountVectorizer(lowercase=False, analyzer=split_on_space)
-    frames_vector_data = vectorizer.fit_transform(input_vec)
-    headers = vectorizer.get_feature_names()
-    frames_vector_array = frames_vector_data.toarray()
+    vectorizer = CountVectorizer(lowercase=False, analyzer=split_on_space, vocabulary=vocabulary) #initiate vectorizer
+    frames_vector_data = vectorizer.fit_transform(input_vec) #fit transform input
+    headers = vectorizer.get_feature_names() #get frames as column headers
+    frames_vector_array = frames_vector_data.toarray() #output vectorizer to array
 
     list_of_lists = []
 
-    for doc, bucket, title in zip(frames_vector_array, time_bucket_list, titles):
+    for doc, bucket, title in zip(frames_vector_array, time_bucket_list, titles): #iterate over both vectors, time buckets and titles
         one_row = []
-        for count, frame in zip(doc, headers):
+        for count, frame in zip(doc, headers): #iterate over both values and corresponding frames
             freq = count
             if discourse_sensitive == True and frame in frames_discourse_ratios_dict[title]:
-                ratio = frames_discourse_ratios_dict[title][frame]
-                freq = freq*ratio
+                ratio = frames_discourse_ratios_dict[title][frame] #get discourse ratio for frame
+                freq = freq*ratio #modify value
                 assert freq != 0, "feature modification failed"
             if typicality_scores != None and frame in typicality_scores_dict[event_type]:
-                score = typicality_scores_dict[event_type][frame]
-                freq = freq*score
-            one_row.append(freq)
-        one_row.append(bucket)
-        list_of_lists.append(one_row)
+                score = typicality_scores_dict[event_type][frame] #get typicality score
+                freq = freq*score #modify value
+            one_row.append(freq) #append value to row
+        one_row.append(bucket) #append time bucket as final value to row
+        list_of_lists.append(one_row) #append row to list
 
-    headers.append("time bucket")
+    headers.append("time bucket") #append time bucket header to headers list
 
     assert len(input_vec) == len(list_of_lists), "not all documents are represented"
     for row in list_of_lists:
         assert len(row) == len(headers), "not all frames are represented in row"
         assert type(row[-1]) == str, "time bucket not in row"
 
-    df = pd.DataFrame(list_of_lists, columns=headers)
+    df = pd.DataFrame(list_of_lists, columns=headers) #create DataFrame
     return df
 
-def train_validate_test_split(df, train_percent=.8, validate_percent=.1, seed=None):
-    np.random.seed(seed)
-    perm = np.random.permutation(df.index)
-    m = len(df.index)
-    train_end = int(train_percent * m)
-    validate_end = int(validate_percent * m) + train_end
-    train = df.loc[perm[:train_end]]
-    validate = df.loc[perm[train_end:validate_end]]
-    test = df.loc[perm[validate_end:]]
-    return train, validate, test
+def extract_features_and_labels(df):
+    """extract features and labels from a data frame"""
+    labels = []
 
-def split_df(df):
-    """split the dataframe into training, development and test dataframes"""
-    time_buckets = df["time bucket"].unique()
-    grouped_df = df.groupby("time bucket")
+    for row in df.itertuples(): #iterate over rows in DataFrame
+        labels.append(row[-1]) #append time bucket label to list
 
-    train_dfs = []
-    develop_dfs = []
-    test_dfs = []
+    del df["time bucket"] #delete label column from DataFrame
+    data = df.T.to_dict().values() #convert DataFrame to list with dict per row
 
-    for time_bucket in time_buckets:
-        group = grouped_df.get_group(time_bucket)
-        train, develop, test = train_validate_test_split(group)
-        assert len(train) > len(develop), "training set not larger than development set"
-        assert len(train) > len(test), "training set not larger than test set"
-        train_dfs.append(train)
-        develop_dfs.append(develop)
-        test_dfs.append(test)
+    assert len(data) == len(labels), "not all data or labels represented"
+    return data, labels
 
-    assert len(train_dfs) == len(time_buckets), "not all time bucket labels have their own set"
+def train_classifier(train_features, train_targets):
+    """train the linear SVM classifier"""
+    #model = SVC(kernel="linear") #initiate SVM dual=False
+    model = LinearSVC(dual=False)
+    vec = DictVectorizer() #initiate vectorizer
+    features_vectorized = vec.fit_transform(train_features) #vectorize features
+    model.fit(features_vectorized, train_targets) #train classifier
+    return model, vec
 
-    train_df = pd.concat(train_dfs)
-    develop_df = pd.concat(develop_dfs)
-    test_df = pd.concat(test_dfs)
-    assert len(train_df) > len(develop_df), "training set not larger than development set"
-    assert len(train_df) > len(test_df), "training set not larger than test set"
-    return train_df, develop_df, test_df
+def classify_data(model, vec, features):
+    """classify data with linear SVM classifier"""
+    vec_features = vec.transform(features) #vectorize features
+    predictions = model.predict(vec_features) #run classifier
+    return predictions
+
+def evaluation(human_annotation, system_output,report_path):
+    """show evaluation metrics of multi-class system output in one classification report"""
+    report = classification_report(human_annotation, system_output, digits=3, output_dict=True) #create report
+    accuracy = f"accuracy {report['accuracy']}"
+    del report['accuracy']
+    df = pd.DataFrame.from_dict(report, orient='index')
+    df = df.round(3)
+    df_latex = df.to_latex()
+
+    with open(report_path, 'w') as outfile:
+        outfile.write(df_latex)
+
+    with open(report_path, "a") as outfile:
+        outfile.write(accuracy)
+    return df

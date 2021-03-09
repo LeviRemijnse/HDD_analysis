@@ -2,6 +2,36 @@ from collections import defaultdict, Counter
 import pandas as pd
 import os
 
+def predicates_from_dict(frame_info_dict):
+    """
+    Load a naf dictionary, extract the predicates and add them to a list.
+    :param frame_info_dict: dictionary with linguistic information extracted from NAF file
+    :type frame_info_dict: dictionary
+    """
+    predicates = []
+
+    for title, info in frame_info_dict.items():
+        for term_id, term_info in info['frame info'].items():
+            lemma = term_info["lemma"]
+            predicates.append(lemma)
+    return predicates
+
+def get_predicate_vocabulary(historical_distance_dict,event_type, verbose):
+    """extract predicates for an event type and put them in a list"""
+    predicates = []
+
+    for cluster in historical_distance_dict[event_type]:
+        time_bucket = cluster[0]
+        collection = cluster[1]
+        for info_dict in collection:
+            for title, info in info_dict.items():
+                for term_id, term_info in info['frame info'].items():
+                    lemma = term_info['lemma']
+                    predicates.append(lemma)
+
+    vocabulary = list(set(predicates))
+    return vocabulary
+
 def compile_predicates(collections):
     """returns dictionary with {event type: {frame: [list of predicates_pos]}"""
     event_type_frame_predicate_dict = {}
@@ -17,7 +47,6 @@ def compile_predicates(collections):
                     lemma_pos = f'{lemma}_{pos}'
                     frame_predicate_dict[frame].append(lemma_pos)
         event_type_frame_predicate_dict[event_type] = frame_predicate_dict
-    #print(event_type_frame_predicate_dict)
     return event_type_frame_predicate_dict
 
 def frequency_distribution(event_type_frame_predicate_dict):

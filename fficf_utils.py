@@ -5,6 +5,7 @@ import random
 import statistics
 import math
 import json
+import shutil
 import pandas as pd
 from collections import Counter, defaultdict
 from sklearn.feature_extraction.text import CountVectorizer, TfidfTransformer
@@ -257,11 +258,14 @@ def c_tf_idf(frame_freq_event_type, total_freq_frames_event_type, total_n_docs, 
     :type frame_freq_event_types: integer
     """
     tf = frame_freq_event_type/total_freq_frames_event_type
-    #idf = math.log(total_n_docs/frame_freq_event_types)
     idf_array = np.log(np.divide(total_n_docs, frame_freq_event_types)).reshape(-1,1)
     idf = idf_array[0][0]
     c_tf_idf = tf*idf
     return c_tf_idf
+
+def normalize_data(data):
+    the_array = (data - np.min(data)) / (np.max(data) - np.min(data))
+    return list(the_array)
 
 def ff_icf(collections, event_type_frames_dict, frame_freq_dict):
     """
@@ -308,8 +312,11 @@ def ff_icf(collections, event_type_frames_dict, frame_freq_dict):
                     frame_freq_event_types += freq_dict[frame]['absolute frequency'] #add the absolute frequency to counter
             assert frame_freq_event_types != 0, f"{frame} not in corpus"
             c_tf_idf_score = c_tf_idf(frame_freq_event_type, total_freq_frames_event_type, total_n_docs, frame_freq_event_types)
+            if c_tf_idf_score < 0:
+                c_tf_idf_score = 0
             scores.append(c_tf_idf_score) #append the score to a list
-        list_of_lists.append(scores) #append the list to another list. The result is a list of scores per each event type
+        normalized_scores = normalize_data(scores)
+        list_of_lists.append(normalized_scores) #append the list to another list. The result is a list of scores per each event type
 
     c_tf_idf_round = np.round(list_of_lists, decimals=6)
     assert len(c_tf_idf_round) == len(collections), "not all event types are represented as list with c-tf-idf scores"
@@ -355,18 +362,20 @@ def contrastive_analysis(collections, analysis_types, stopframes, min_df, verbos
 
     return output_list, frame_freq_dict
 
-def create_output_folder(output_folder,start_from_scratch):
+def create_output_folder(output_folder,start_from_scratch,verbose):
     '''creates output folder for export dataframe'''
-    folder = output_folder
-
-    if os.path.isdir(folder):
+    if os.path.isdir(output_folder):
         if start_from_scratch == True:
-            shutil.rmtree(folder)
+            shutil.rmtree(output_folder)
+            if verbose >= 1:
+                print(f"removed existing folder {output_folder}")
 
-    if not os.path.isdir(folder):
-        os.mkdir(folder)
+    if not os.path.isdir(output_folder):
+        os.mkdir(output_folder)
+        if verbose >= 1:
+            print(f"created folder at {output_folder}")
 
-def output_tfidf_to_format(tf_idfdict,frame_freq_dict,xlsx_path,output_folder,start_from_scratch):
+def output_tfidf_to_format(tf_idfdict,frame_freq_dict,xlsx_path,output_folder,start_from_scratch,verbose):
     """exports the output of the tf-idf analysis to an excel format"""
     headers = ['event type', 'rank', 'frame', 'tf-idf value', 'absolute freq', 'relative freq', 'judgement']
     list_of_lists = []
@@ -397,12 +406,13 @@ def output_tfidf_to_format(tf_idfdict,frame_freq_dict,xlsx_path,output_folder,st
 
     if output_folder != None:
         create_output_folder(output_folder=output_folder,
-                            start_from_scratch=start_from_scratch)
+                            start_from_scratch=start_from_scratch,
+                            verbose=verbose)
         df.to_excel(xlsx_path, index=False)
 
     return df
 
-def output_tfidf_to_json(tf_idfdict,json_path,output_folder,start_from_scratch):
+def output_tfidf_to_json(tf_idfdict,json_path,output_folder,start_from_scratch,verbose):
     """exports the output of the tf-idf analysis to a json format"""
     json_dict = {}
 
@@ -416,7 +426,8 @@ def output_tfidf_to_json(tf_idfdict,json_path,output_folder,start_from_scratch):
 
     if output_folder != None:
         create_output_folder(output_folder=output_folder,
-                            start_from_scratch=start_from_scratch)
+                            start_from_scratch=start_from_scratch,
+                            verbose=verbose)
         with open(json_path, 'w') as outfile:
             json.dump(json_dict, outfile, indent=4, sort_keys=True)
     return

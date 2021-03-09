@@ -1,13 +1,17 @@
 from collections import defaultdict
-from .fficf_utils import frames_collection
+from .fficf_utils import frames_collection, create_output_folder
 import operator
+import random
+import json
 
-def get_historical_distance(collections,lang2doc2dct_info,language,verbose):
+def get_historical_distance(collections,lang2doc2dct_info,language,unknown_distance_path,output_folder,start_from_scratch,verbose):
     """creates a nested dictionary with event type as key and a sorted list of tuples, sorted on historical distance as value"""
     event_type_historical_distance_dict = defaultdict(list)
+    event_type_unknown_distace_dict = {}
 
     for event_type, info_dicts in collections.items():
         historical_distance_dict = defaultdict(list)
+        unknown_distance = []
         count = 0
         for info_dict in info_dicts:
             for title, info in info_dict.items():
@@ -17,11 +21,17 @@ def get_historical_distance(collections,lang2doc2dct_info,language,verbose):
                         if historical_distance == "unknown":
                             if verbose >= 3:
                                 count += 1
-                                continue
+                            unknown_distance.append(info_dict)
+                            continue
                         else:
                             assert type(historical_distance) == int, "historical distance is not integer"
                             historical_distance_dict[historical_distance].append(info_dict)
-
+        event_type_unknown_distace_dict[event_type] = unknown_distance
+        create_output_folder(output_folder=output_folder,
+                            start_from_scratch=start_from_scratch,
+                            verbose=verbose)
+        with open(unknown_distance_path, 'w') as outfile:
+            json.dump(event_type_unknown_distace_dict, outfile, indent=4, sort_keys=True)
         if verbose >= 3:
             print(f"{event_type}: {count} texts with unknown historical distance filtered out")
         sorted_days = sorted(historical_distance_dict.items(), key=operator.itemgetter(0))
@@ -68,3 +78,42 @@ def cluster_time_buckets(historical_distance_dict,time_buckets,verbose):
                 print(f"time bucket {cluster[0]}: {len(cluster[1])} reference texts")
 
     return time_bucket_dict
+
+def sample_time_buckets(historical_distance_info_dict, verbose):
+    """create proportional sizes of subcorpora across time buckets. randomize when selecting the texts for this sample."""
+    event_type_lengths_dict = {}
+
+    for event_type, clusters in historical_distance_info_dict.items(): #iterate over clusters of dicts
+        lengths_dict = {}
+        for cluster in clusters:
+            time_bucket = cluster[0]
+            list_of_dicts = cluster[1]
+            lengths_dict[time_bucket] = len(list_of_dicts) #add time bucket:number of docs
+            event_type_lengths_dict[event_type] = lengths_dict
+
+    sampled_collection_dict = {}
+
+    for event_type, clusters in historical_distance_info_dict.items(): #iterate over clusters of dicts
+        list_of_buckets = []
+        lengths_dict = event_type_lengths_dict[event_type]
+        len_smallest_corpus = min(lengths_dict.values())
+        if verbose >= 1:
+            print(f"{event_type}: {len_smallest_corpus} sampled texts per time bucket")
+        for cluster in clusters:
+            time_bucket = cluster[0]
+            list_of_dicts = cluster[1]
+            sampled_list = random.sample(list_of_dicts, len_smallest_corpus) #extract random sample with the length of the smallest subcorpus
+            assert len(sampled_list) == len_smallest_corpus, "subcorpora not proportional"
+            new_cluster = (time_bucket, sampled_list) #create new cluster with time bucket and samples subcorpus
+            list_of_buckets.append(new_cluster) #append cluster to list
+        assert len(list_of_buckets) == len(lengths_dict), "not all time buckets represented"
+        sampled_collection_dict[event_type] = list_of_buckets #add event type:list of clusters to dict
+    return sampled_collection_dict
+
+def collection_to_json(sampled_collection,json_path,output_folder,start_from_scratch,verbose):
+    """export collections to json"""
+    create_output_folder(output_folder=output_folder,
+                        start_from_scratch=start_from_scratch,
+                        verbose=verbose)
+    with open(json_path, 'w') as outfile:
+        json.dump(sampled_collection, outfile, indent=4, sort_keys=True)
