@@ -70,14 +70,19 @@ def analysis_paths(time_bucket_config, absolute_path, experiment, balanced_class
     paths_dict['dev path'] = dev_path
     test_path = f"{absolute_path}/{folder_basename}/titles_test.pkl"
     paths_dict['test path'] = test_path
-    report = f"{absolute_path}/{folder_basename}/{experiment}/report.txt"
-    paths_dict['classification report'] = report
+    dev_report = f"{absolute_path}/{folder_basename}/{experiment}/dev_report.txt"
+    paths_dict['dev report'] = dev_report
+    test_report = f"{absolute_path}/{folder_basename}/{experiment}/test_report.txt"
+    paths_dict['test report'] = test_report
     unknown_path = f"{absolute_path}/{folder_basename}/unknown_distance.json"
     paths_dict['unknown distance'] = unknown_path
     model_path = f"{absolute_path}/{folder_basename}/{experiment}/model.pkl"
     paths_dict['model'] = model_path
     experiment_folder = f"{absolute_path}/{folder_basename}/{experiment}"
     paths_dict["experiment folder"] = experiment_folder
+    error_analysis_path = f"{experiment_folder}/error_analysis.xlsx"
+    paths_dict["error analysis path"] = error_analysis_path
+
 
     if verbose >= 1:
         print(folder)

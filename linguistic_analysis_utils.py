@@ -151,7 +151,7 @@ def bag_of_predicates(historical_distance_info_dict, event_type, titles_df, verb
     df = pd.DataFrame(list_of_lists, columns=headers) #create DataFrame
     return df
 
-def doc_features(historical_distance_info_dict, vocabulary, titles_df, event_type, selected_features, discourse_sensitive, typicality_scores, verbose):
+def doc_features(historical_distance_info_dict, vocabulary, titles_df, event_type, selected_features, discourse_sensitive, path_typicality_scores, use_typicality_scores, verbose):
     """get features on document level"""
     target_titles = set(titles_df["Title"])
     input_vec = []
@@ -159,8 +159,8 @@ def doc_features(historical_distance_info_dict, vocabulary, titles_df, event_typ
     titles = []
     frames_discourse_ratios_dict = {}
 
-    if typicality_scores != None:
-        with open(typicality_scores, "r") as infile:
+    if use_typicality_scores:
+        with open(path_typicality_scores, "r") as infile:
             typicality_scores_dict = json.load(infile) #load typicality scores
 
     for tupl in historical_distance_info_dict[event_type]: #iterate over clusters in event type
@@ -195,9 +195,10 @@ def doc_features(historical_distance_info_dict, vocabulary, titles_df, event_typ
                 ratio = frames_discourse_ratios_dict[title][frame] #get discourse ratio for frame
                 freq = freq*ratio #modify value
                 assert freq != 0, "feature modification failed"
-            if typicality_scores != None and frame in typicality_scores_dict[event_type]:
-                score = typicality_scores_dict[event_type][frame] #get typicality score
-                freq = freq*score #modify value
+            if use_typicality_scores:
+                if frame in typicality_scores_dict[event_type]:
+                    score = typicality_scores_dict[event_type][frame] #get typicality score
+                    freq = freq*score #modify value
             one_row.append(freq) #append value to row
         one_row.append(bucket) #append time bucket as final value to row
         list_of_lists.append(one_row) #append row to list
@@ -227,7 +228,7 @@ def extract_features_and_labels(df):
 
 def train_classifier(train_features, train_targets):
     """train the linear SVM classifier"""
-    #model = SVC(kernel="linear") #initiate SVM dual=False
+    #model = SVC(kernel="rbf") #initiate SVM
     model = LinearSVC(dual=False)
     vec = DictVectorizer() #initiate vectorizer
     features_vectorized = vec.fit_transform(train_features) #vectorize features
@@ -255,3 +256,48 @@ def evaluation(human_annotation, system_output,report_path):
     with open(report_path, "a") as outfile:
         outfile.write(accuracy)
     return df
+
+def remove_columns_with_zeros(train_df, dev_df, test_df, verbose=0):
+
+    if verbose >= 5:
+        print()
+        print(f'length train_df: {len(train_df)}')
+        print(f'length dev_df: {len(dev_df)}')
+        print(f'length test_df: {len(test_df)}')
+
+    big_df = pd.concat([train_df,
+                            dev_df,
+                            test_df], axis=0)
+
+    assert (len(train_df) + len(dev_df) + len(test_df)) == len(big_df)
+
+    if verbose >= 5:
+        print()
+        print(f'length joined df: {len(big_df)}')
+
+    to_remove = []
+    for column in big_df.columns:
+        values = set(big_df[column])
+        if values == {0}:
+            to_remove.append(column)
+
+    if verbose >= 5:
+        print(f'{len(to_remove)} frames have zeros for all rows of all dataframes')
+
+
+    train_df = train_df.drop(columns=to_remove)
+    dev_df = dev_df.drop(columns=to_remove)
+    test_df = test_df.drop(columns=to_remove)
+
+    assert list(train_df.columns) == list(dev_df.columns)
+    assert list(train_df.columns) == list(test_df.columns)
+    assert list(dev_df.columns) == list(test_df.columns)
+
+    if verbose >= 5:
+        print()
+        print()
+        print(f'# of columns train_df: {len(train_df.columns)}')
+        print(f'# of columns dev_df: {len(dev_df.columns)}')
+        print(f'# of columns test_df: {len(test_df.columns)}')
+
+    return train_df, dev_df, test_df

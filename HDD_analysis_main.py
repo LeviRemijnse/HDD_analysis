@@ -1,9 +1,10 @@
 from .xml_utils import srl_id_frames, term_id_lemmas, determiner_id_info, compound_id_info, get_text_title, frame_info_dict, sentence_info
-from .fficf_utils import contrastive_analysis, output_tfidf_to_format, sample_corpus, delete_smallest_texts, output_tfidf_to_json, create_output_folder
+from .fficf_utils import contrastive_analysis, output_tfidf_to_format, sample_corpus, delete_smallest_texts, output_tfidf_to_json, create_output_folder, compute_c_tf_idf_between_time_buckets
 from .predicate_utils import compile_predicates, frequency_distribution, output_predicates_to_format
 from .path_utils import get_naf_paths, get_lang2doc2dct_info, analysis_paths
 from .historical_distance_utils import get_historical_distance, historical_distance_frames, cluster_time_buckets, sample_time_buckets, collection_to_json
-from .linguistic_analysis_utils import doc_features, split_df, extract_features_and_labels, train_classifier, classify_data, evaluation, titles_buckets_df, df_to_pickle, get_frame_vocabulary, bag_of_predicates
+from .linguistic_analysis_utils import doc_features, split_df, extract_features_and_labels, train_classifier, classify_data, evaluation, titles_buckets_df, df_to_pickle, get_frame_vocabulary, bag_of_predicates, remove_columns_with_zeros
+from .error_analysis_utils import f_importances
 from lxml import etree
 import json
 import os
@@ -228,9 +229,10 @@ def linguistic_analysis(time_bucket_config,
                         language,
                         event_type,
                         selected_features,
+                        path_typicality_scores,
                         use_frames=True,
                         discourse_sensitive=True,
-                        typicality_scores=None,
+                        use_typicality_scores=False,
                         use_bow=False,
                         balanced_classes=False,
                         verbose=0):
@@ -285,7 +287,8 @@ def linguistic_analysis(time_bucket_config,
                                     event_type=event_type,
                                     selected_features=selected_features,
                                     discourse_sensitive=discourse_sensitive,
-                                    typicality_scores=typicality_scores,
+                                    path_typicality_scores=path_typicality_scores,
+                                    use_typicality_scores=use_typicality_scores,
                                     verbose=verbose)
             del df_frame["time bucket"] #delete label column from DataFrame
             df = pd.concat([df_frame, df_pred], axis=1)
@@ -301,28 +304,60 @@ def linguistic_analysis(time_bucket_config,
                                 event_type=event_type,
                                 selected_features=selected_features,
                                 discourse_sensitive=discourse_sensitive,
-                                typicality_scores=typicality_scores,
+                                path_typicality_scores=path_typicality_scores,
+                                use_typicality_scores=use_typicality_scores,
                                 verbose=verbose)
         else:
             raise Exception(f'use_bow and use_frames are both False, which is not allowed')
 
         features_df_path  = os.path.join(paths_dict["experiment folder"], f'{basekey}_features.pkl')
         pickle.dump(df, open(features_df_path, 'wb'))
-        features, labels = extract_features_and_labels(df=df)
-        info[f'{basekey}_features'] = features
-        info[f'{basekey}_labels'] = labels
+        info[f'{basekey}_df'] = df
+
+    train_df, dev_df, test_df = remove_columns_with_zeros(train_df=info['train_df'],
+                                                            dev_df=info['dev_df'],
+                                                            test_df=info['test_df'],
+                                                            verbose=verbose)
+    info['train_df'] = train_df
+    info['dev_df'] = dev_df
+    info['test_df'] = test_df
+
+    if all([use_frames,
+            not use_bow,
+            path_typicality_scores]):
+        with open(path_typicality_scores, "r") as infile:
+            typicality_scores_dict = json.load(infile) #load typicality scores
+        event_type_typicality_scores = typicality_scores_dict[event_type]
+        for cutoff_point in [10, 25,50, 'all']:
+            c_tf_idf_df = compute_c_tf_idf_between_time_buckets(typicality_scores=event_type_typicality_scores,
+                                                                train_df=train_df,
+                                                                dev_df=dev_df,
+                                                                test_df=test_df,
+                                                                top_n_typical_frames=cutoff_point,
+                                                                verbose=verbose)
+            c_tf_idf_path = os.path.join(paths_dict['experiment folder'],f'{cutoff_point}.xlsx')
+            c_tf_idf_df.to_excel(c_tf_idf_path)
+
+
+    for phase in ['train', 'dev', 'test']:
+        features, labels = extract_features_and_labels(df=info[f'{phase}_df'])
+        info[f'{phase}_features'] = features
+        info[f'{phase}_labels'] = labels
 
     model, vec = train_classifier(train_features=info['train_features'],
                                     train_targets=info['train_labels'])
+    error_analysis_df = f_importances(model,info['train_df'])
+    error_analysis_df.to_excel(paths_dict['error analysis path'])
     pickle.dump(model, open(paths_dict['model'], 'wb'))
-    predictions = classify_data(model=model,
-                                vec=vec,
-                                features=info['dev_features'])
-    evaluation_report = evaluation(human_annotation=info['dev_labels'],
-                                    system_output=predictions,
-                                    report_path=paths_dict['classification report'])
+    for phase in ['dev', 'test']:
+        predictions = classify_data(model=model,
+                                    vec=vec,
+                                    features=info[f'{phase}_features'])
+        evaluation_report = evaluation(human_annotation=info[f'{phase}_labels'],
+                                        system_output=predictions,
+                                        report_path=paths_dict[f'{phase} report'])
 
-    if verbose >= 1:
-        print(experiment)
-        print(evaluation_report)
+        if verbose >= 1:
+            print(experiment, phase)
+            print(evaluation_report)
     return

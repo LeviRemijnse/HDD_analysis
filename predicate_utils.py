@@ -39,11 +39,11 @@ def compile_predicates(collections):
     for event_type, info_list in collections.items():
         frame_predicate_dict = defaultdict(list)
         for nafdict in info_list:
-            for title, frame_ids in nafdict.items():
-                for frame_id, info in frame_ids.items():
-                    frame = info['frame']
-                    lemma = info['lemma']
-                    pos = info['POS']
+            for title, info in nafdict.items():
+                for term_id, frame_info in info['frame info'].items(): #iterate over term id:frame info
+                    frame = frame_info['frame']
+                    lemma = frame_info['lemma']
+                    pos = frame_info['POS']
                     lemma_pos = f'{lemma}_{pos}'
                     frame_predicate_dict[frame].append(lemma_pos)
         event_type_frame_predicate_dict[event_type] = frame_predicate_dict

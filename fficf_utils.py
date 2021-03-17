@@ -312,8 +312,8 @@ def ff_icf(collections, event_type_frames_dict, frame_freq_dict):
                     frame_freq_event_types += freq_dict[frame]['absolute frequency'] #add the absolute frequency to counter
             assert frame_freq_event_types != 0, f"{frame} not in corpus"
             c_tf_idf_score = c_tf_idf(frame_freq_event_type, total_freq_frames_event_type, total_n_docs, frame_freq_event_types)
-            if c_tf_idf_score < 0:
-                c_tf_idf_score = 0
+            #if c_tf_idf_score < 0:
+            #    c_tf_idf_score = 0
             scores.append(c_tf_idf_score) #append the score to a list
         normalized_scores = normalize_data(scores)
         list_of_lists.append(normalized_scores) #append the list to another list. The result is a list of scores per each event type
@@ -431,3 +431,99 @@ def output_tfidf_to_json(tf_idfdict,json_path,output_folder,start_from_scratch,v
         with open(json_path, 'w') as outfile:
             json.dump(json_dict, outfile, indent=4, sort_keys=True)
     return
+
+def top_n_frames(typicality_scores, top_n_typical_frames, verbose=0):
+    if top_n_typical_frames == 'all':
+        the_target_frames = list(typicality_scores)
+    else:
+        the_target_frames = []
+
+        n = 0
+        for frame_label, typ_score in sorted(typicality_scores.items(),
+                                             key=operator.itemgetter(1),
+                                             reverse=True):
+            the_target_frames.append(frame_label)
+
+            n += 1
+            if n == top_n_typical_frames:
+                break
+
+        assert len(the_target_frames) == top_n_typical_frames
+
+    if verbose >= 5:
+        print()
+        print(f'selected {len(the_target_frames)} from total of {len(typicality_scores)} frames')
+        print(f'first three are: {the_target_frames[:3]}')
+
+    return the_target_frames
+
+def get_time_bucket_to_frame_to_freq(big_df,
+                                     target_frames=None):
+
+    the_time_buckets = set(big_df['time bucket'])
+    time_bucket_to_frame_to_freq = {}
+    frame_to_freq = defaultdict(int)
+    time_bucket_to_total_frame_occurrences = defaultdict(int)
+
+    for time_bucket in the_time_buckets:
+        time_bucket_df = big_df[big_df['time bucket'] == time_bucket]
+        time_bucket_to_frame_to_freq[time_bucket] = {}
+
+        for frame_label in time_bucket_df.columns:
+            if frame_label != 'time bucket':
+
+                if target_frames:
+                    if frame_label not in target_frames:
+                        continue
+
+                total = sum(time_bucket_df[frame_label])
+                time_bucket_to_frame_to_freq[time_bucket][frame_label] = total
+                frame_to_freq[frame_label] += total
+                time_bucket_to_total_frame_occurrences[time_bucket] += total
+
+    return time_bucket_to_frame_to_freq, frame_to_freq, time_bucket_to_total_frame_occurrences
+
+def compute_c_tf_idf_between_time_buckets(typicality_scores,
+                                          train_df,
+                                          dev_df,
+                                          test_df,
+                                          top_n_typical_frames,
+                                          verbose=0):
+    the_target_frames = top_n_frames(typicality_scores=typicality_scores,
+                                     top_n_typical_frames=top_n_typical_frames,
+                                     verbose=verbose)
+
+    the_big_df = pd.concat([train_df,
+                                dev_df,
+                                test_df], axis=0)
+
+
+    # time_bucket -> frame -> frequency
+    # total frequency of a frame across time buckets
+    # total number of frame occurrences per time bucket
+    time_bucket_to_frame_to_freq,\
+    frame_to_freq, \
+    time_bucket_to_total_frame_occurrences = get_time_bucket_to_frame_to_freq(big_df=the_big_df,
+                                                                              target_frames=the_target_frames)
+
+
+    # total number of docs
+    number_of_docs = len(the_big_df)
+
+    list_of_lists = []
+    headers = ['time bucket', 'frame', 'c_tf_idf']
+
+    for time_bucket, tb_frame_to_freq in time_bucket_to_frame_to_freq.items():
+
+        for frame, tb_freq in tb_frame_to_freq.items():
+
+            c_tf_idf_score = c_tf_idf(frame_freq_event_type=tb_freq,
+                                      total_freq_frames_event_type=time_bucket_to_total_frame_occurrences[time_bucket],
+                                      total_n_docs=number_of_docs,
+                                      frame_freq_event_types=frame_to_freq[frame])
+            one_row = [time_bucket, frame, c_tf_idf_score]
+            list_of_lists.append(one_row)
+
+
+    c_tf_idf_df = pd.DataFrame(list_of_lists, columns=headers)
+    return c_tf_idf_df
