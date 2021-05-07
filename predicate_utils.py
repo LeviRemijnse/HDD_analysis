@@ -1,6 +1,7 @@
 from collections import defaultdict, Counter
 import pandas as pd
 import os
+import json
 
 def predicates_from_dict(frame_info_dict):
     """
@@ -102,3 +103,11 @@ def output_predicates_to_format(frequency_dict,xlsx_path,output_folder,start_fro
                             start_from_scratch=start_from_scratch)
         df.to_excel(xlsx_path, index=False)
     return df
+
+def output_predicates_to_json(frequency_dict, json_path, output_folder, start_from_scratch, verbose):
+    """exports the predicate distribution to json"""
+    if output_folder != None:
+        create_output_folder(output_folder=output_folder,
+                            start_from_scratch=start_from_scratch)
+        with open(json_path, 'w') as outfile:
+            json.dump(frequency_dict, outfile, indent=4, sort_keys=True)

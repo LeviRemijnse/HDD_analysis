@@ -2,19 +2,22 @@ from nltk.corpus import framenet as fn
 from collections import defaultdict, Counter
 import networkx as nx
 
-def get_inheritance_relations(fn, verbose=0):
+def get_relations(fn, relations=set(), verbose=0):
     """get the inheritance relations for the FrameNet frames"""
-    frame_to_parent_via_inheritance = defaultdict(set)
+    frame_to_superframe = defaultdict(set)
 
     for fn_rel in fn.frame_relations():
-        if fn_rel.type.name == 'Inheritance':
-            frame_to_parent_via_inheritance[fn_rel.subFrameName].add(fn_rel.superFrameName)
+        if relations:
+            if fn_rel.type.name not in relations:
+                continue
+        frame_to_superframe[fn_rel.subFrameName].add(fn_rel.superFrameName)
 
     if verbose:
         print()
-        print(f'found {len(frame_to_parent_via_inheritance)} frames with inheritance rels.')
-        print(Counter(len(value) for value in frame_to_parent_via_inheritance.values()))
-    return frame_to_parent_via_inheritance
+        print(f'found {len(frame_to_superframe)} frames with at least one superframe.')
+        print(f'chosen relations are {relations} (empty set indicates all frame-to-frame relations).')
+        print(Counter(len(value) for value in frame_to_superframe.values()))
+    return frame_to_superframe
 
 def get_digraph(sub_to_super, verbose=0):
     """get digraph"""
@@ -37,7 +40,19 @@ def get_digraph(sub_to_super, verbose=0):
         print(f'number of roots is {len(roots)}')
     return g, roots
 
-def get_frame_to_root_information(di_g,fn,roots,verbose=0):
+def get_graph(sub_to_super, verbose=0):
+
+    g = nx.Graph()
+    for subframe, superframes in sub_to_super.items():
+        for superframe in superframes:
+            g.add_edge(superframe, subframe)
+
+    if verbose >= 1:
+        print()
+        print(nx.info(g))
+    return g
+
+def get_frame_to_root_information(di_g, fn, roots, verbose=0):
     """get all the relations from frames to their roots"""
     frame_to_root_information = {}
 
@@ -64,20 +79,22 @@ def get_frame_to_root_information(di_g,fn,roots,verbose=0):
                     }
                     root_information.append(root_info)
         # check for 2> root paths
-        chosen_root_info = {}
-        min_path_length = 100000
-        for root_info in root_information:
-            if root_info['len_path'] < min_path_length:
-                min_path_length = root_info['len_path']
-                chosen_root_info = root_info
-        assert chosen_root_info != {}
-        frame_to_root_information[frame] = root_info
+        #chosen_root_info = {}
+        #min_path_length = 100000
+
+        #for root_info in root_information:
+        #    if root_info['len_path'] < min_path_length:
+        #        min_path_length = root_info['len_path']
+        #        chosen_root_info = root_info
+        #assert chosen_root_info != {}
+
+        frame_to_root_information[frame] = root_information
 
     assert len(frame_to_root_information) == 1221
-    path_lengths = [root_info['len_path']
-                    for root_info in frame_to_root_information.values()]
+    #path_lengths = [root_info['len_path']
+    #                for root_info in frame_to_root_information.values()]
 
-    if verbose >= 1:
-        print()
-        print(f'distribution of path lengths: {Counter(path_lengths)}')
+    #if verbose >= 1:
+    #    print()
+    #    print(f'distribution of path lengths: {Counter(path_lengths)}')
     return frame_to_root_information

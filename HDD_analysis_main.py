@@ -1,11 +1,14 @@
 from .xml_utils import srl_id_frames, term_id_lemmas, determiner_id_info, compound_id_info, get_text_title, frame_info_dict, sentence_info
 from .fficf_utils import contrastive_analysis, output_tfidf_to_format, sample_corpus, delete_smallest_texts, output_tfidf_to_json, create_output_folder, compute_c_tf_idf_between_time_buckets
-from .predicate_utils import compile_predicates, frequency_distribution, output_predicates_to_format
+from .predicate_utils import compile_predicates, frequency_distribution, output_predicates_to_format, output_predicates_to_json
 from .path_utils import get_naf_paths, get_lang2doc2dct_info, analysis_paths
 from .historical_distance_utils import get_historical_distance, historical_distance_frames, cluster_time_buckets, sample_time_buckets, collection_to_json
 from .linguistic_analysis_utils import doc_features, split_df, extract_features_and_labels, train_classifier, classify_data, evaluation, titles_buckets_df, df_to_pickle, get_frame_vocabulary, bag_of_predicates, remove_columns_with_zeros
 from .error_analysis_utils import f_importances
+from .odd_one_out_utils import extract_rel_freq, get_frame_to_root_info, split_rel_freq, sample_items, get_root_to_frame_info
+
 from lxml import etree
+from nltk.corpus import framenet as fn
 import json
 import os
 import pickle
@@ -66,6 +69,7 @@ def fficf_info(project,
                 minimal_frames_per_doc=10,
                 json_paths=None,
                 gva_path=None,
+                json_path=None,
                 verbose=0):
     """extract frames dictionary with naf information per text per event type, perform fficf metrics and returns a dataframe"""
     assert type(analysis_types) == list, "analysis types are not in list"
@@ -86,6 +90,7 @@ def fficf_info(project,
             sliced_corpus[event_type] = info_dicts
 
     sampled_corpus = sample_corpus(sliced_corpus)
+    sampled_corpus_to_json(sampled_corpus, json_path, output_folder, start_from_scratch, verbose)
 
     if verbose >= 3:
         for event_type, info in sampled_corpus.items():
@@ -117,6 +122,7 @@ def fficf_info(project,
 def frame_predicate_distribution(collections,
                                     xlsx_path,
                                     output_folder,
+                                    json_path,
                                     start_from_scratch=False,
                                     verbose=0):
     """extracts a dictionary with event type as key and frame/predicate frequency distributions as values and returns a dataframe"""
@@ -126,6 +132,11 @@ def frame_predicate_distribution(collections,
                                                             xlsx_path=xlsx_path,
                                                             output_folder=output_folder,
                                                             start_from_scratch=start_from_scratch)
+    output_predicates_to_json(frequency_dict=distribution_dict,
+                                json_path=json_path,
+                                output_folder=output_folder,
+                                start_from_scratch=start_from_scratch,
+                                verbose=verbose)
     return distribution_dataframe
 
 def historical_distance(project,
@@ -228,7 +239,6 @@ def linguistic_analysis(time_bucket_config,
                         project,
                         language,
                         event_type,
-                        selected_features,
                         path_typicality_scores,
                         use_frames=True,
                         discourse_sensitive=True,
@@ -237,14 +247,14 @@ def linguistic_analysis(time_bucket_config,
                         balanced_classes=False,
                         verbose=0):
     """performs statistical analyses on linguistic phenomena distributed over time buckets and visualizes them"""
-    paths_dict = analysis_paths(time_bucket_config=time_bucket_config,
+    paths_dict = analysis_paths(time_bucket_config=time_bucket_config, #create dictionary with paths
                                 absolute_path=absolute_path,
                                 experiment=experiment,
                                 balanced_classes=balanced_classes,
                                 verbose=verbose)
 
     if not os.path.isdir(paths_dict["time bucket folder"]):
-        sampled_corpus = historical_distance(project=project,
+        sampled_corpus = historical_distance(project=project, #create sampled_corpus, write to disk
                                             language=language,
                                             output_folder=paths_dict["time bucket folder"],
                                             json_path=paths_dict["sampled corpus"],
@@ -252,7 +262,7 @@ def linguistic_analysis(time_bucket_config,
                                             balanced_classes=balanced_classes,
                                             dct_time_buckets=time_bucket_config,
                                             verbose=verbose)
-        titles_train, titles_dev, titles_test = sampled_titles_to_dfs(historical_distance_info_dict=paths_dict["sampled corpus"],
+        titles_train, titles_dev, titles_test = sampled_titles_to_dfs(historical_distance_info_dict=paths_dict["sampled corpus"], #create train, dev and test sets of document titles, write to disk
                                                                         event_type=event_type,
                                                                         train_path=paths_dict["train path"],
                                                                         dev_path=paths_dict["dev path"],
@@ -262,47 +272,45 @@ def linguistic_analysis(time_bucket_config,
 
     else:
         with open(paths_dict["sampled corpus"], "r") as infile:
-            sampled_corpus = json.load(infile)
-        titles_train = pd.read_pickle(paths_dict["train path"])
-        titles_dev = pd.read_pickle(paths_dict["dev path"])
-        titles_test = pd.read_pickle(paths_dict["test path"])
+            sampled_corpus = json.load(infile) #open sampled corpus as dictionary
+        titles_train = pd.read_pickle(paths_dict["train path"]) #open titles of train set
+        titles_dev = pd.read_pickle(paths_dict["dev path"]) #open titles of dev set
+        titles_test = pd.read_pickle(paths_dict["test path"]) #open titles of test set
 
-    create_output_folder(paths_dict['experiment folder'], start_from_scratch=True, verbose=verbose)
+    create_output_folder(paths_dict['experiment folder'], start_from_scratch=True, verbose=verbose) #create subfolder for experiment
 
-    vocabulary = get_frame_vocabulary(historical_distance_dict=sampled_corpus,
+    vocabulary = get_frame_vocabulary(historical_distance_dict=sampled_corpus, #create frame vocabulary
                                         event_type=event_type)
-    basekey_and_df = [("train", titles_train),("dev", titles_dev),("test", titles_test)]
+    basekey_and_df = [("train", titles_train),("dev", titles_dev),("test", titles_test)] #list of tuples (basekey,split_titles_df)
 
     info = {}
 
     for basekey, split_df in basekey_and_df:
         if use_bow and use_frames:
-            df_pred = bag_of_predicates(historical_distance_info_dict=sampled_corpus,
+            df_pred = bag_of_predicates(historical_distance_info_dict=sampled_corpus, #create dataframe with predicates as features
                                         event_type=event_type,
                                         titles_df=split_df,
                                         verbose=verbose)
-            df_frame = doc_features(historical_distance_info_dict=sampled_corpus,
+            df_frame = doc_features(historical_distance_info_dict=sampled_corpus, #create dataframe with frames as features
                                     vocabulary=vocabulary,
                                     titles_df=split_df,
                                     event_type=event_type,
-                                    selected_features=selected_features,
                                     discourse_sensitive=discourse_sensitive,
                                     path_typicality_scores=path_typicality_scores,
                                     use_typicality_scores=use_typicality_scores,
                                     verbose=verbose)
             del df_frame["time bucket"] #delete label column from DataFrame
-            df = pd.concat([df_frame, df_pred], axis=1)
+            df = pd.concat([df_frame, df_pred], axis=1) #merge frame dataframe and predicate dataframe
         elif use_bow:
-            df = bag_of_predicates(historical_distance_info_dict=sampled_corpus,
+            df = bag_of_predicates(historical_distance_info_dict=sampled_corpus, #create dataframe with predicates as features
                                     event_type=event_type,
                                     titles_df=split_df,
                                     verbose=verbose)
         elif use_frames:
-            df = doc_features(historical_distance_info_dict=sampled_corpus,
+            df = doc_features(historical_distance_info_dict=sampled_corpus, #create dataframe with frames as features
                                 vocabulary=vocabulary,
                                 titles_df=split_df,
                                 event_type=event_type,
-                                selected_features=selected_features,
                                 discourse_sensitive=discourse_sensitive,
                                 path_typicality_scores=path_typicality_scores,
                                 use_typicality_scores=use_typicality_scores,
@@ -314,46 +322,46 @@ def linguistic_analysis(time_bucket_config,
         pickle.dump(df, open(features_df_path, 'wb'))
         info[f'{basekey}_df'] = df
 
-    train_df, dev_df, test_df = remove_columns_with_zeros(train_df=info['train_df'],
+    train_df, dev_df, test_df = remove_columns_with_zeros(train_df=info['train_df'], #remove all columns with zero's in dataframes
                                                             dev_df=info['dev_df'],
                                                             test_df=info['test_df'],
                                                             verbose=verbose)
-    info['train_df'] = train_df
-    info['dev_df'] = dev_df
-    info['test_df'] = test_df
+    info['train_df'] = train_df #add training dataframe to info
+    info['dev_df'] = dev_df #add dev dataframe to info
+    info['test_df'] = test_df #add test dataframe to info
 
     if all([use_frames,
             not use_bow,
             path_typicality_scores]):
         with open(path_typicality_scores, "r") as infile:
             typicality_scores_dict = json.load(infile) #load typicality scores
-        event_type_typicality_scores = typicality_scores_dict[event_type]
+        event_type_typicality_scores = typicality_scores_dict[event_type] #list of lists to variable
         for cutoff_point in [10, 25,50, 'all']:
-            c_tf_idf_df = compute_c_tf_idf_between_time_buckets(typicality_scores=event_type_typicality_scores,
+            c_tf_idf_df = compute_c_tf_idf_between_time_buckets(typicality_scores=event_type_typicality_scores, #compute c-tf-idf between time buckets
                                                                 train_df=train_df,
                                                                 dev_df=dev_df,
                                                                 test_df=test_df,
                                                                 top_n_typical_frames=cutoff_point,
                                                                 verbose=verbose)
-            c_tf_idf_path = os.path.join(paths_dict['experiment folder'],f'{cutoff_point}.xlsx')
-            c_tf_idf_df.to_excel(c_tf_idf_path)
+            c_tf_idf_path = os.path.join(paths_dict['experiment folder'],f'{cutoff_point}.xlsx') #create path for excel
+            c_tf_idf_df.to_excel(c_tf_idf_path) #export c-tf-idf between time buckets to excel
 
 
     for phase in ['train', 'dev', 'test']:
-        features, labels = extract_features_and_labels(df=info[f'{phase}_df'])
-        info[f'{phase}_features'] = features
-        info[f'{phase}_labels'] = labels
+        features, labels = extract_features_and_labels(df=info[f'{phase}_df']) #extract features and labels
+        info[f'{phase}_features'] = features #add features to info
+        info[f'{phase}_labels'] = labels #add labels to info
 
-    model, vec = train_classifier(train_features=info['train_features'],
+    model, vec = train_classifier(train_features=info['train_features'], #create model and vectorizer of classifier
                                     train_targets=info['train_labels'])
-    error_analysis_df = f_importances(model,info['train_df'])
-    error_analysis_df.to_excel(paths_dict['error analysis path'])
+    error_analysis_df = f_importances(model,info['train_df']) #model analysis to variable
+    error_analysis_df.to_excel(paths_dict['error analysis path']) #model analysis to excel
     pickle.dump(model, open(paths_dict['model'], 'wb'))
     for phase in ['dev', 'test']:
-        predictions = classify_data(model=model,
+        predictions = classify_data(model=model, #run the model
                                     vec=vec,
                                     features=info[f'{phase}_features'])
-        evaluation_report = evaluation(human_annotation=info[f'{phase}_labels'],
+        evaluation_report = evaluation(human_annotation=info[f'{phase}_labels'], #evaluate the model, evaluation to txt
                                         system_output=predictions,
                                         report_path=paths_dict[f'{phase} report'])
 
@@ -361,3 +369,37 @@ def linguistic_analysis(time_bucket_config,
             print(experiment, phase)
             print(evaluation_report)
     return
+
+def prepare_odd_one_out(frames_path,
+                        event_type,
+                        range_dict,
+                        roots,
+                        item_length,
+                        use_shortest_path=False,
+                        use_shortest_path_to_root=False,
+                        verbose=0):
+    """open a frequency distribuation of frames for a specific event type and prepare sets of frames for odd
+    one out annotation test."""
+    frame_to_root_info_dict = get_frame_to_root_info(fn=fn,
+                                                    verbose=verbose)
+    root_to_frame_info_dict = get_root_to_frame_info(frame_to_root_info=frame_to_root_info_dict,
+                                                    verbose=verbose)
+    root_rel_freqs = extract_rel_freq(frames_path=frames_path,
+                                        frame_to_root_info=frame_to_root_info_dict,
+                                        event_type=event_type,
+                                        verbose=verbose)
+    split_dict = {}
+    for root in roots:
+        root_dict = split_rel_freq(root_rel_freqs=root_rel_freqs,
+                                    range_dict=range_dict,
+                                    root=root,
+                                    verbose=verbose)
+        split_dict[root] = root_dict
+    sampled_items = sample_items(split_dict=split_dict,
+                                    item_length=item_length,
+                                    use_shortest_path=use_shortest_path,
+                                    fn=fn,
+                                    frame_to_root_info=frame_to_root_info_dict,
+                                    root_to_frame_info=root_to_frame_info_dict,
+                                    use_shortest_path_to_root=use_shortest_path_to_root,
+                                    verbose=verbose)

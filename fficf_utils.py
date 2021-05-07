@@ -527,3 +527,11 @@ def compute_c_tf_idf_between_time_buckets(typicality_scores,
 
     c_tf_idf_df = pd.DataFrame(list_of_lists, columns=headers)
     return c_tf_idf_df
+
+def sampled_corpus_to_json(sampled_corpus, json_path, output_folder, start_from_scratch, verbose):
+    """exports the predicate distribution to json"""
+    if output_folder != None:
+        create_output_folder(output_folder=output_folder,
+                            start_from_scratch=start_from_scratch)
+        with open(json_path, 'w') as outfile:
+            json.dump(sampled_corpus, outfile, indent=4, sort_keys=True)

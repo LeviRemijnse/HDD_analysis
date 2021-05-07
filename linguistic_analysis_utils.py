@@ -151,7 +151,7 @@ def bag_of_predicates(historical_distance_info_dict, event_type, titles_df, verb
     df = pd.DataFrame(list_of_lists, columns=headers) #create DataFrame
     return df
 
-def doc_features(historical_distance_info_dict, vocabulary, titles_df, event_type, selected_features, discourse_sensitive, path_typicality_scores, use_typicality_scores, verbose):
+def doc_features(historical_distance_info_dict, vocabulary, titles_df, event_type, discourse_sensitive, path_typicality_scores, use_typicality_scores, verbose):
     """get features on document level"""
     target_titles = set(titles_df["Title"])
     input_vec = []
