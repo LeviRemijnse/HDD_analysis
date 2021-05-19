@@ -2,18 +2,9 @@ import sys
 import os
 sys.path.append('../../')
 
-from HDD_analysis import frame_info
+from HDD_analysis import dir_path, frame_info
 
-path = 'input_files'
+path = f'{dir_path}/test/input_files/VJ Cozer - Creator Entertainment.naf'
 
-collection = []
-
-for root, directories, files in os.walk(path):
-    for file in files:
-        if file.endswith('.naf'):
-            collection.append(os.path.join(root, file))
-
-naf = collection[0]
-
-frame_info_dict = frame_info(naf_root=naf,
+frame_info_dict = frame_info(naf_root=path,
                                 verbose=2)

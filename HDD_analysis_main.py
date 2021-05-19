@@ -69,9 +69,32 @@ def fficf_info(project,
                 minimal_frames_per_doc=10,
                 json_paths=None,
                 gva_path=None,
-                json_path=None,
                 verbose=0):
-    """extract frames dictionary with naf information per text per event type, perform fficf metrics and returns a dataframe"""
+    """
+    Extract frames dictionary with naf information per text per event type, perform fficf metrics and returns a dataframe.
+    :param project: name of the project in DFNDataReleases
+    :param language: language of the reference texts in the project
+    :param analysis_types: list with the types of contrastive analyses (c_tf_idf or tf_idf)
+    :param xlsx_paths: list of excel paths where the output is written to
+    :param output_folder: output folder
+    :param start_from_scratch: should previous output should be overwritten?
+    :param stopframes: frames that should be ignored when performing tf_idf
+    :param min_df: when vectorizing, ignore terms that have a document frequency lower than this threshold
+    :param minimal_frames_per_doc: ignore documents with frame frequency lower than this threshold
+    :param json_paths: list of json paths where the output is written to
+    :param gva_path: path to gun violence subcorpus
+    :type project: string
+    :type language: string
+    :type analysis_types: list
+    :type xlsx_paths: list
+    :type output_folder: string
+    :type start_from_scratch: boolean
+    :type stopframes: list
+    :type mind_df: integer
+    :type minimal_frames_per_doc: integer
+    :type json_paths: list
+    :type gva_path: string
+    """
     assert type(analysis_types) == list, "analysis types are not in list"
     assert "tf_idf" or "c_tf_idf" in analysis_types, "metrics not recognized by fficf_info()"
     assert type(xlsx_paths) == list, "xlsx_paths not in list"
@@ -90,7 +113,6 @@ def fficf_info(project,
             sliced_corpus[event_type] = info_dicts
 
     sampled_corpus = sample_corpus(sliced_corpus)
-    sampled_corpus_to_json(sampled_corpus, json_path, output_folder, start_from_scratch, verbose)
 
     if verbose >= 3:
         for event_type, info in sampled_corpus.items():
@@ -221,7 +243,7 @@ def sampled_titles_to_dfs(historical_distance_info_dict,
 
     df = titles_buckets_df(list_of_buckets=list_of_buckets)
     train_df, dev_df, test_df = split_df(df=df)
-    print(dev_df)
+
     df_to_pickle(train_df=train_df,
                     dev_df=dev_df,
                     test_df=test_df,
@@ -357,7 +379,7 @@ def linguistic_analysis(time_bucket_config,
     error_analysis_df = f_importances(model,info['train_df']) #model analysis to variable
     error_analysis_df.to_excel(paths_dict['error analysis path']) #model analysis to excel
     pickle.dump(model, open(paths_dict['model'], 'wb'))
-    for phase in ['dev', 'test']:
+    for phase in ['test']:
         predictions = classify_data(model=model, #run the model
                                     vec=vec,
                                     features=info[f'{phase}_features'])
